@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 
 	"github.com/howeyc/gopass"
@@ -56,18 +55,18 @@ func printHelp() {
 	m := `
 Wallet: %s
 (h) Help
-(s) Send
-(r) Receive (Wallet QR)
+(s) Sign transaction
 (i) Wallet info
-(spk) Show private key (CAUTION!!!)
-(q) Quit
+(qr) Show account public address QR
+(qr_secret_key) Show account private key QR
+(print_secret_key) Print account private key
 
 `
 	fmt.Printf(m, full.Address())
 }
 
 func showQR(s string) error {
-	png, err := qrcode.Encode(full.Address(), qrcode.Medium, -4)
+	png, err := qrcode.Encode(s, qrcode.Medium, -4)
 	if err != nil {
 		return err
 	}
@@ -83,56 +82,45 @@ func showQR(s string) error {
 	return nil
 }
 
-func send() error {
-	destAddress := prompt("Destination address:")
-	if destAddress == "" {
+func sign() error {
+	raw := prompt("Enter raw transaction:")
+	if raw == "" {
 		return fmt.Errorf("Abort")
 	}
-	_, err := keypair.Parse(destAddress)
+	txn, err := txnbuild.TransactionFromXDR(raw)
 	if err != nil {
-		return fmt.Errorf("Invalid Stellar address")
-	}
-	sourceAccount, err := accountInfo()
-	if err != nil {
-		return fmt.Errorf("Error getting account info")
-	}
-	amount := prompt("amount:")
-	if amount == "" {
-		return fmt.Errorf("Abort")
-	}
-	_, err = strconv.ParseFloat(amount, 64)
-	if err != nil {
-		return fmt.Errorf("Invalid amount")
-	}
-	memo := prompt("Text Memo (left blank for none):")
-	op := txnbuild.Payment{
-		Destination: destAddress,
-		Amount:      amount,
-		Asset:       txnbuild.NativeAsset{},
+		return fmt.Errorf("Invalid transaction")
 	}
 
-	tx := txnbuild.Transaction{
-		SourceAccount: &sourceAccount,
-		Operations:    []txnbuild.Operation{&op},
-		Timebounds:    txnbuild.NewTimeout(3600), // One hour timeout
-		Network:       network.PublicNetworkPassphrase,
+	if txn.SourceAccount.GetAccountID() != full.Address() {
+		fmt.Printf("%s != %s\n", txn.SourceAccount.GetAccountID(), full.Address())
+		return fmt.Errorf("Source address don't match")
 	}
-	if memo != "" {
-		tx.Memo = txnbuild.MemoText(memo)
-	}
-
-	_, err = tx.BuildSignEncode(full)
+	txn.Network = network.PublicNetworkPassphrase
+	err = txn.Sign(full)
 	if err != nil {
-		return fmt.Errorf("Fail building transaction")
+		return fmt.Errorf("Fail signing transaction: %v", err)
 	}
-	submit := prompt("Submit transaction? (y/N):")
-	if strings.ToLower(submit) != "y" {
+	txnStr, err := txn.Base64()
+	if err != nil {
+		return fmt.Errorf("Fail encoding transaction")
+	}
+	r := prompt("(Submit/Print/QR) signed transaction (s/p/q)?")
+	switch strings.ToLower(r) {
+	case "s":
+		client := horizonclient.DefaultPublicNetClient
+		_, err = client.SubmitTransaction(txn)
+		if err != nil {
+			return fmt.Errorf("Fail Submit transaction")
+		}
+	case "p":
+		fmt.Println("======= START SIGNED TRANSACTION ========")
+		fmt.Println(txnStr)
+		fmt.Println("======== END SIGNED TRANSACTION =========")
+	case "q":
+		showQR(txnStr)
+	default:
 		return fmt.Errorf("Abort")
-	}
-	client := horizonclient.DefaultPublicNetClient
-	_, err = client.SubmitTransaction(tx)
-	if err != nil {
-		return fmt.Errorf("Fail Submit transaction")
 	}
 	return nil
 }
@@ -148,20 +136,23 @@ func mainMenu() {
 		case "h":
 			printHelp()
 		case "s":
-			err := send()
+			err := sign()
 			if err != nil {
-				fmt.Printf("Send error: %s\n", err.Error())
-			} else {
-				fmt.Printf("Succesful\n")
+				fmt.Printf("Sign error: %s\n", err.Error())
 			}
 		case "i":
 			printWalletInfo()
-		case "r":
+		case "qr":
 			err := showQR(full.Address())
 			if err != nil {
-				fmt.Printf("Please install Image Magick display command\n")
+				fmt.Printf("Please install Image Magick\n")
 			}
-		case "spk":
+		case "qr_private_key":
+			err := showQR(full.Seed())
+			if err != nil {
+				fmt.Printf("Please install Image Magick\n")
+			}
+		case "print_private_key":
 			fmt.Printf("Seed: %s\n", full.Seed())
 		case "q":
 			return
