@@ -62,6 +62,7 @@ Wallet: %s
 (qr) Show account public address QR
 (qr_secret_key) Show account private key QR
 (print_secret_key) Print account private key
+(q) quit
 
 `
 	fmt.Printf(m, full.Address())
