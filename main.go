@@ -3,9 +3,11 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"github.com/howeyc/gopass"
@@ -82,8 +84,69 @@ func showQR(s string) error {
 	return nil
 }
 
+func asset2str(asset txnbuild.Asset) string {
+	code := asset.GetCode()
+	if code == "" {
+		code = "XLM"
+	}
+	return code
+}
+
+func op2str(op txnbuild.Operation) string {
+
+	switch v := op.(type) {
+	case *txnbuild.Payment:
+		return fmt.Sprintf("Send %s %s to %s", v.Amount, asset2str(v.Asset), v.Destination)
+	case *txnbuild.CreateAccount:
+		return fmt.Sprintf("Create account %s and fund with %s XLM", v.Destination, v.Amount)
+	case *txnbuild.ChangeTrust:
+		limit, _ := strconv.ParseFloat(v.Limit, 64)
+		if limit == 0 {
+			return fmt.Sprintf("Remove trust line %s issuer: %s", asset2str(v.Line), v.Line.GetIssuer())
+		}
+		return fmt.Sprintf("Change trust line %s issuer: %s limit: %s", asset2str(v.Line), v.Line.GetIssuer(), v.Limit)
+
+	case *txnbuild.ManageBuyOffer:
+		return fmt.Sprintf("Manage buy offer %s %s @ %s %s/%s", v.Amount, asset2str(v.Buying), v.Price, asset2str(v.Selling), asset2str(v.Buying))
+	case *txnbuild.ManageSellOffer:
+		return fmt.Sprintf("Manage sell offer %s %s @ %s %s/%s", v.Amount, asset2str(v.Selling), v.Price, asset2str(v.Buying), asset2str(v.Selling))
+	case *txnbuild.CreatePassiveSellOffer:
+		return fmt.Sprintf("Create passive sell offer %s %s @ %s %s/%s", v.Amount, asset2str(v.Selling), v.Price, asset2str(v.Buying), asset2str(v.Selling))
+	case *txnbuild.PathPaymentStrictReceive:
+		return fmt.Sprintf("Path payment strict receive: %+v", v)
+	case *txnbuild.PathPaymentStrictSend:
+		return fmt.Sprintf("Path payment strict send: %+v", v)
+	case *txnbuild.AllowTrust:
+		return fmt.Sprintf("Allow trust to %s asset: %s authoroize: %t", v.Trustor, asset2str(v.Type), v.Authorize)
+	case *txnbuild.AccountMerge:
+		return fmt.Sprintf("Account merge. Destination account: %s", v.Destination)
+	case *txnbuild.ManageData:
+		return fmt.Sprintf("Manage data Name: %s Value: %s", strconv.Quote(v.Name), strconv.Quote(string(v.Value)))
+	case *txnbuild.BumpSequence:
+		return fmt.Sprintf("Bump sequence to %d", v.BumpTo)
+	default:
+		return fmt.Sprintf("Unknown operation: %v", v)
+
+	}
+}
+
+func memo2str(memo txnbuild.Memo) string {
+	switch v := memo.(type) {
+	case txnbuild.MemoText:
+		return fmt.Sprintf("Text: %s", v)
+	case txnbuild.MemoID:
+		return fmt.Sprintf("ID: %d", v)
+	case txnbuild.MemoHash:
+		return fmt.Sprintf("HASH: %s", hex.EncodeToString(v[:]))
+	case txnbuild.MemoReturn:
+		return fmt.Sprintf("RETURN: %s", hex.EncodeToString(v[:]))
+	}
+	return ""
+}
+
 func sign() error {
 	raw := prompt("Enter raw transaction:")
+	fmt.Printf("\n")
 	if raw == "" {
 		return fmt.Errorf("Abort")
 	}
@@ -91,12 +154,23 @@ func sign() error {
 	if err != nil {
 		return fmt.Errorf("Invalid transaction")
 	}
-
 	if txn.SourceAccount.GetAccountID() != full.Address() {
 		fmt.Printf("%s != %s\n", txn.SourceAccount.GetAccountID(), full.Address())
 		return fmt.Errorf("Source address don't match")
 	}
 	txn.Network = network.PublicNetworkPassphrase
+
+	memo := memo2str(txn.Memo)
+	if memo != "" {
+		fmt.Printf("Transaction memo %s\n", memo)
+	}
+
+	fmt.Printf("Operations in transaction:\n")
+	for i, op := range txn.Operations {
+		fmt.Printf("(%d) %s\n", i+1, op2str(op))
+	}
+	fmt.Printf("\n")
+
 	err = txn.Sign(full)
 	if err != nil {
 		return fmt.Errorf("Fail signing transaction: %v", err)
