@@ -60,8 +60,8 @@ Wallet: %s
 (s) Sign transaction
 (i) Wallet info
 (qr) Show account public address QR
-(qr_secret_key) Show account private key QR
-(print_secret_key) Print account private key
+(qr_private_key) Show account private key QR
+(print_private_key) Print account private key
 (q) quit
 
 `
