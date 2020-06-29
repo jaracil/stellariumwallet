@@ -238,14 +238,18 @@ func mainMenu() {
 }
 
 func main() {
+	var err error
 
 	fmt.Print("Enter pass-phrase: ")
 	pass, err := gopass.GetPasswdMasked()
 	if err != nil {
 		panic(err)
 	}
-	kp := keypair.Master(string(pass))
-	full = kp.(*keypair.Full)
+
+	full, err = keypair.ParseFull(string(pass))
+	if err != nil {
+		full = keypair.Master(string(pass)).(*keypair.Full)
+	}
 
 	mainMenu()
 }
