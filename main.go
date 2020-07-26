@@ -28,15 +28,19 @@ func prompt(s string) string {
 	return strings.Trim(text, "\r\n ")
 }
 
-func accountInfo() (horizon.Account, error) {
+func accountInfo(address string) (horizon.Account, error) {
 	client := horizonclient.DefaultPublicNetClient
 
-	accountRequest := horizonclient.AccountRequest{AccountID: full.Address()}
+	if address == "" {
+		address = full.Address()
+	}
+
+	accountRequest := horizonclient.AccountRequest{AccountID: address}
 	return client.AccountDetail(accountRequest)
 }
 
 func printWalletInfo() {
-	ai, err := accountInfo()
+	ai, err := accountInfo("")
 	if err != nil {
 		fmt.Println("Error obtaining wallet info")
 		return
@@ -49,14 +53,97 @@ func printWalletInfo() {
 		if typ == "native" {
 			code = "XLM"
 		}
-		fmt.Printf("%s: %s\n", code, balance.Balance)
+		fmt.Printf("asset: %-12s balance: %s\n", code, balance.Balance)
 	}
+}
+
+func pay() {
+	ai, err := accountInfo("")
+	if err != nil {
+		fmt.Println("Error obtaining wallet info")
+		return
+	}
+
+	var assets []*horizon.Asset
+	var balances []string
+
+	for _, balance := range ai.Balances {
+		asset := &horizon.Asset{Code: balance.Code, Type: balance.Type, Issuer: balance.Issuer}
+		assets = append(assets, asset)
+		balances = append(balances, balance.Balance)
+	}
+
+	for i := range assets {
+		assetCode := assets[i].Code
+		if assets[i].Type == "native" {
+			assetCode = "XLM"
+		}
+		fmt.Printf("%d - asset: %-12s balance: %s\n", i+1, assetCode, balances[i])
+	}
+	idx := prompt(fmt.Sprintf("Asset [1 - %d]?", len(assets)))
+	if idx == "" {
+		fmt.Println("Pay exit")
+		return
+	}
+	assetIndex, err := strconv.Atoi(idx)
+	if err != nil || (assetIndex < 1 || assetIndex > len(assets)) {
+		fmt.Println("Invalid asset index")
+		return
+	}
+	assetIndex--
+	assetCode := assets[assetIndex].Code
+	if assets[assetIndex].Type == "native" {
+		assetCode = "XLM"
+	}
+
+	ammount := prompt(fmt.Sprintf("%s ammount?", assetCode))
+	if ammount == "" {
+		fmt.Println("Pay exit")
+		return
+	}
+	assetAmmount, err := strconv.ParseFloat(ammount, 64)
+	if err != nil || (assetIndex < 1 || assetIndex > len(assets)) {
+		fmt.Println("Invalid ammount")
+		return
+	}
+
+	memo := prompt("Memo?")
+
+	destinationAddress := prompt("Destination address?")
+	if destinationAddress == "" {
+		fmt.Println("Pay exit")
+		return
+	}
+
+	_, err = keypair.ParseAddress(destinationAddress)
+	if err != nil {
+		fmt.Println("Invalid destination address")
+		return
+	}
+
+	createAccount := false
+
+	destAccountInfo, err := accountInfo(destinationAddress)
+	if err != nil {
+		hce := err.(*horizonclient.Error)
+		if hce.Problem.Status == 404 {
+			createAccount = true
+		} else {
+			fmt.Printf("Invalid destination address, error: %v\n", err)
+			return
+		}
+	}
+
+	fmt.Printf("Destination account info:%v\ncreate:%v\n", destAccountInfo, createAccount)
+
+	fmt.Printf("Asset ammount: %f Memo:%s Address:%s\n", assetAmmount, memo, destinationAddress)
 }
 
 func printHelp() {
 	m := `
 Wallet: %s
 (h) Help
+(p) Pay
 (s) Sign transaction
 (i) Wallet info
 (qr) Show account public address QR
@@ -210,6 +297,8 @@ func mainMenu() {
 		case "":
 		case "h":
 			printHelp()
+		case "p":
+			pay()
 		case "s":
 			err := sign()
 			if err != nil {
