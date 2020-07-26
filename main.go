@@ -12,10 +12,10 @@ import (
 
 	"github.com/howeyc/gopass"
 	"github.com/skip2/go-qrcode"
-	"github.com/stellar/go/clients/horizon"
 	"github.com/stellar/go/clients/horizonclient"
 	"github.com/stellar/go/keypair"
 	"github.com/stellar/go/network"
+	hProtocol "github.com/stellar/go/protocols/horizon"
 	"github.com/stellar/go/txnbuild"
 )
 
@@ -28,7 +28,7 @@ func prompt(s string) string {
 	return strings.Trim(text, "\r\n ")
 }
 
-func accountInfo(address string) (horizon.Account, error) {
+func accountInfo(address string) (hProtocol.Account, error) {
 	client := horizonclient.DefaultPublicNetClient
 
 	if address == "" {
@@ -64,11 +64,11 @@ func pay() {
 		return
 	}
 
-	var assets []*horizon.Asset
+	var assets []*hProtocol.Asset
 	var balances []string
 
 	for _, balance := range ai.Balances {
-		asset := &horizon.Asset{Code: balance.Code, Type: balance.Type, Issuer: balance.Issuer}
+		asset := &hProtocol.Asset{Code: balance.Code, Type: balance.Type, Issuer: balance.Issuer}
 		assets = append(assets, asset)
 		balances = append(balances, balance.Balance)
 	}
@@ -86,7 +86,7 @@ func pay() {
 		return
 	}
 	assetIndex, err := strconv.Atoi(idx)
-	if err != nil || (assetIndex < 1 || assetIndex > len(assets)) {
+	if err != nil && (assetIndex < 1 || assetIndex > len(assets)) {
 		fmt.Println("Invalid asset index")
 		return
 	}
@@ -101,8 +101,9 @@ func pay() {
 		fmt.Println("Pay exit")
 		return
 	}
-	assetAmmount, err := strconv.ParseFloat(ammount, 64)
-	if err != nil || (assetIndex < 1 || assetIndex > len(assets)) {
+
+	assetAmount, err := strconv.ParseFloat(ammount, 64)
+	if err != nil && (assetAmount > 0) {
 		fmt.Println("Invalid ammount")
 		return
 	}
@@ -123,7 +124,7 @@ func pay() {
 
 	createAccount := false
 
-	destAccountInfo, err := accountInfo(destinationAddress)
+	_, err = accountInfo(destinationAddress)
 	if err != nil {
 		hce := err.(*horizonclient.Error)
 		if hce.Problem.Status == 404 {
@@ -132,11 +133,54 @@ func pay() {
 			fmt.Printf("Invalid destination address, error: %v\n", err)
 			return
 		}
+
 	}
 
-	fmt.Printf("Destination account info:%v\ncreate:%v\n", destAccountInfo, createAccount)
+	var asset txnbuild.Asset
+	if assets[assetIndex].Type == "native" {
+		asset = txnbuild.NativeAsset{}
+	} else {
+		asset = txnbuild.CreditAsset{Code: assets[assetIndex].Code, Issuer: assets[assetIndex].Issuer}
+	}
 
-	fmt.Printf("Asset ammount: %f Memo:%s Address:%s\n", assetAmmount, memo, destinationAddress)
+	var op txnbuild.Operation
+
+	if !createAccount {
+		op = &txnbuild.Payment{
+			Destination: destinationAddress,
+			Amount:      ammount,
+			Asset:       asset,
+		}
+	} else {
+		if assets[assetIndex].Type == "native" {
+			op = &txnbuild.CreateAccount{
+				Destination: destinationAddress,
+				Amount:      ammount,
+			}
+		} else {
+			fmt.Println("You need XLM to create account")
+			return
+		}
+	}
+
+	tx, err := txnbuild.NewTransaction(
+		txnbuild.TransactionParams{
+			SourceAccount:        &ai,
+			IncrementSequenceNum: true,
+			Operations:           []txnbuild.Operation{op},
+			BaseFee:              txnbuild.MinBaseFee,
+			Memo:                 txnbuild.MemoText(memo),
+			Timebounds:           txnbuild.NewTimeout(300),
+		},
+	)
+
+	raw, err := tx.Base64()
+	if err != nil {
+		fmt.Printf("Error obtaining base64: %v", err)
+		return
+	}
+
+	sign(raw)
 }
 
 func printHelp() {
@@ -232,34 +276,39 @@ func memo2str(memo txnbuild.Memo) string {
 	return ""
 }
 
-func sign() error {
-	raw := prompt("Enter raw transaction:")
-	fmt.Printf("\n")
+func sign(raw string) error {
 	if raw == "" {
-		return fmt.Errorf("Abort")
+		raw = prompt("Enter raw transaction:")
+		fmt.Printf("\n")
+		if raw == "" {
+			return fmt.Errorf("Abort")
+		}
 	}
-	txn, err := txnbuild.TransactionFromXDR(raw)
+	txnX, err := txnbuild.TransactionFromXDR(raw)
 	if err != nil {
 		return fmt.Errorf("Invalid transaction")
 	}
-	if txn.SourceAccount.GetAccountID() != full.Address() {
-		fmt.Printf("%s != %s\n", txn.SourceAccount.GetAccountID(), full.Address())
+
+	txn, _ := txnX.Transaction()
+	sa := txn.SourceAccount()
+
+	if sa.GetAccountID() != full.Address() {
+		fmt.Printf("%s != %s\n", sa.GetAccountID(), full.Address())
 		return fmt.Errorf("Source address don't match")
 	}
-	txn.Network = network.PublicNetworkPassphrase
 
-	memo := memo2str(txn.Memo)
+	memo := memo2str(txn.Memo())
 	if memo != "" {
 		fmt.Printf("Transaction memo %s\n", memo)
 	}
 
 	fmt.Printf("Operations in transaction:\n")
-	for i, op := range txn.Operations {
+	for i, op := range txn.Operations() {
 		fmt.Printf("(%d) %s\n", i+1, op2str(op))
 	}
 	fmt.Printf("\n")
 
-	err = txn.Sign(full)
+	txn, err = txn.Sign(network.PublicNetworkPassphrase, full)
 	if err != nil {
 		return fmt.Errorf("Fail signing transaction: %v", err)
 	}
@@ -300,7 +349,7 @@ func mainMenu() {
 		case "p":
 			pay()
 		case "s":
-			err := sign()
+			err := sign("")
 			if err != nil {
 				fmt.Printf("Sign error: %s\n", err.Error())
 			}
