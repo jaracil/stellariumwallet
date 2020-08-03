@@ -322,7 +322,7 @@ func sign(raw string) error {
 		client := horizonclient.DefaultPublicNetClient
 		_, err = client.SubmitTransaction(txn)
 		if err != nil {
-			return fmt.Errorf("Fail Submit transaction")
+			return fmt.Errorf("Fail Submit transaction: %v", err)
 		}
 	case "p":
 		fmt.Println("======= START SIGNED TRANSACTION ========")
