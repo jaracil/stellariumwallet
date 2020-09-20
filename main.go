@@ -320,7 +320,7 @@ func sign(raw string) error {
 	switch strings.ToLower(r) {
 	case "s":
 		client := horizonclient.DefaultPublicNetClient
-		_, err = client.SubmitTransaction(txn)
+		_, err = client.SubmitTransactionXDR(txnStr)
 		if err != nil {
 			return fmt.Errorf("Fail Submit transaction: %v", err)
 		}
