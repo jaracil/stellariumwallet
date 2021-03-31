@@ -290,6 +290,11 @@ func sign(raw string) error {
 	}
 
 	txn, _ := txnX.Transaction()
+	sa := txn.SourceAccount()
+
+	if sa.GetAccountID() != full.Address() {
+		fmt.Printf("Source account: %s\n", sa.GetAccountID())
+	}
 
 	memo := memo2str(txn.Memo())
 	if memo != "" {
