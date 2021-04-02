@@ -168,7 +168,7 @@ func pay() {
 			SourceAccount:        &ai,
 			IncrementSequenceNum: true,
 			Operations:           []txnbuild.Operation{op},
-			BaseFee:              txnbuild.MinBaseFee,
+			BaseFee:              100000,
 			Memo:                 txnbuild.MemoText(memo),
 			Timebounds:           txnbuild.NewTimeout(300),
 		},
