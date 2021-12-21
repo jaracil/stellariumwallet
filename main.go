@@ -216,7 +216,7 @@ func showQR(s string) error {
 	return nil
 }
 
-func asset2str(asset txnbuild.Asset) string {
+func asset2str(asset txnbuild.BasicAsset) string {
 	code := asset.GetCode()
 	if code == "" {
 		code = "XLM"
